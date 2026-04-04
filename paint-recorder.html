@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Paint Recorder - 動画オーバーレイ作成</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif;
+    background: #1a1a2e; color: #eee;
+    height: 100vh; height: 100dvh;
+    display: flex; flex-direction: column;
+    overflow: hidden; user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px; background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    flex-wrap: wrap; z-index: 10;
+  }
+  .toolbar-group { display: flex; align-items: center; gap: 5px; }
+  .toolbar label { font-size: 11px; color: #a0a0c0; white-space: nowrap; }
+  .divider { width: 1px; height: 24px; background: #0f3460; }
+
+  input[type="color"] {
+    -webkit-appearance: none; border: 2px solid #0f3460;
+    border-radius: 6px; width: 30px; height: 30px; cursor: pointer; background: none;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+  input[type="color"]::-webkit-color-swatch { border-radius: 4px; border: none; }
+
+  input[type="range"] {
+    -webkit-appearance: none; width: 80px; height: 5px;
+    background: #0f3460; border-radius: 3px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px;
+    background: #e94560; border-radius: 50%; cursor: pointer;
+  }
+
+  .size-preview { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+  .size-dot { background: #e94560; border-radius: 50%; }
+
+  .palette { display: flex; gap: 3px; flex-wrap: wrap; }
+  .palette-color {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid transparent; cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s; position: relative;
+  }
+  .palette-color:hover { transform: scale(1.2); }
+  .palette-color.active { border-color: #fff; box-shadow: 0 0 6px rgba(255,255,255,0.4); }
+  .palette-color .tooltip {
+    display: none; position: absolute; bottom: 26px; left: 50%;
+    transform: translateX(-50%); background: #000; color: #aaa;
+    font-size: 9px; padding: 2px 5px; border-radius: 3px; white-space: nowrap;
+    pointer-events: none; z-index: 30;
+  }
+  .palette-color:hover .tooltip { display: block; }
+
+  .btn {
+    padding: 6px 10px; border: none; border-radius: 5px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn:active { transform: scale(0.96); }
+  .btn-record { background: #e94560; color: #fff; }
+  .btn-record:hover { background: #d63851; }
+  .btn-record.recording { background: #ff2020; animation: pulse 1s infinite; }
+  .btn-default { background: #0f3460; color: #a0a0c0; }
+  .btn-default:hover { background: #1a4a7a; }
+  .btn-active { background: #e94560 !important; color: #fff !important; }
+  .btn-danger { background: #333; color: #ccc; }
+  .btn-danger:hover { background: #444; }
+  .btn-load { background: #1a936f; color: #fff; }
+  .btn-load:hover { background: #157a5c; }
+
+  select.toolbar-select {
+    background: #0f3460; color: #eee; border: 1px solid #1a4a7a;
+    border-radius: 4px; padding: 4px 6px; font-size: 11px; cursor: pointer;
+  }
+
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,32,32,0.5); }
+    50% { box-shadow: 0 0 0 8px rgba(255,32,32,0); }
+  }
+
+  .rec-indicator { display: none; align-items: center; gap: 4px; font-size: 11px; color: #ff4444; font-weight: bold; }
+  .rec-indicator.show { display: flex; }
+  .rec-dot { width: 8px; height: 8px; background: #ff2020; border-radius: 50%; animation: blink 1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.2;} }
+
+  .timer { font-family: 'Courier New', monospace; font-size: 12px; color: #ff8888; min-width: 45px; }
+  .res-badge { font-size: 10px; color: #6a8caf; background: #0d1b2a; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+
+  .brush-btn {
+    padding: 4px 8px; border: 1px solid #0f3460; border-radius: 4px;
+    font-size: 11px; cursor: pointer; background: #16213e; color: #a0a0c0;
+  }
+  .brush-btn.active { background: #e94560; color: #fff; border-color: #e94560; }
+  .brush-btn:hover:not(.active) { background: #1a4a7a; }
+
+  .canvas-container {
+    flex: 1; position: relative; overflow: hidden;
+    background: #111; display: flex; align-items: center; justify-content: center;
+  }
+  .canvas-wrapper {
+    position: relative;
+    background-image:
+      linear-gradient(45deg, #2a2a3a 25%, transparent 25%),
+      linear-gradient(-45deg, #2a2a3a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a2a3a 75%),
+      linear-gradient(-45deg, transparent 75%, #2a2a3a 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    background-color: #222233;
+  }
+  .canvas-wrapper video {
+    display: block; width: 100%; height: 100%;
+    position: absolute; top: 0; left: 0; object-fit: contain;
+  }
+  .canvas-wrapper canvas {
+    display: block; position: absolute; top: 0; left: 0;
+    cursor: crosshair; z-index: 2; touch-action: none;
+  }
+
+  .drop-zone {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+    z-index: 5; pointer-events: none;
+  }
+  .drop-zone.initial { pointer-events: auto; }
+  .drop-zone-content { text-align: center; color: #556; padding: 20px; }
+  .drop-zone-content .icon { font-size: 48px; margin-bottom: 12px; }
+  .drop-zone-content h2 { font-size: 18px; color: #889; font-weight: 500; margin-bottom: 8px; }
+  .drop-zone-content p { font-size: 13px; color: #556; margin-bottom: 16px; }
+
+  .drag-overlay {
+    display: none; position: absolute; inset: 0;
+    background: rgba(26,147,111,0.15); border: 3px dashed #1a936f;
+    border-radius: 12px; z-index: 20; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .drag-overlay.show { display: flex; }
+  .drag-overlay span { font-size: 20px; color: #1a936f; font-weight: 600; }
+
+  .video-controls {
+    display: none; align-items: center; gap: 8px;
+    padding: 6px 12px; background: #0d1b2a;
+    border-top: 1px solid #0f3460; z-index: 10;
+  }
+  .video-controls.show { display: flex; }
+  .video-controls .btn-small {
+    padding: 4px 10px; border: none; border-radius: 4px;
+    font-size: 14px; cursor: pointer; background: #16213e; color: #a0a0c0;
+  }
+  .video-controls .btn-small:hover { background: #1a4a7a; }
+  .video-timeline {
+    flex: 1; -webkit-appearance: none; height: 5px;
+    background: #16213e; border-radius: 3px; outline: none; cursor: pointer;
+  }
+  .video-timeline::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    background: #1a936f; border-radius: 50%; cursor: pointer;
+  }
+  .video-time { font-family: 'Courier New', monospace; font-size: 11px; color: #6a8caf; min-width: 80px; text-align: center; }
+  .video-controls label { font-size: 11px; color: #556; }
+  .opacity-slider {
+    -webkit-appearance: none; width: 60px; height: 4px;
+    background: #16213e; border-radius: 2px; outline: none;
+  }
+  .opacity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    background: #6a8caf; border-radius: 50%; cursor: pointer;
+  }
+
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.8); z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: #1e2a4a; border-radius: 12px;
+    padding: 28px; max-width: 420px; width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal h3 { font-size: 16px; margin-bottom: 16px; color: #eee; text-align: center; }
+  .export-option {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px; margin-bottom: 10px;
+    background: #16213e; border: 2px solid #0f3460;
+    border-radius: 8px; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .export-option:hover { border-color: #1a936f; background: #1a2a4e; }
+  .export-option:active { transform: scale(0.98); }
+  .export-icon { font-size: 28px; flex-shrink: 0; }
+  .export-info h4 { font-size: 14px; color: #eee; margin-bottom: 3px; }
+  .export-info p { font-size: 11px; color: #778; line-height: 1.4; }
+  .export-tag {
+    display: inline-block; font-size: 9px; padding: 1px 5px;
+    border-radius: 3px; margin-top: 4px; font-weight: 600;
+  }
+  .tag-green { background: rgba(76,175,80,0.2); color: #4CAF50; }
+  .tag-blue { background: rgba(33,150,243,0.2); color: #2196F3; }
+  .tag-orange { background: rgba(255,152,0,0.2); color: #FF9800; }
+  .modal-cancel {
+    display: block; width: 100%; padding: 10px;
+    background: none; border: 1px solid #333; border-radius: 6px;
+    color: #888; font-size: 12px; cursor: pointer; margin-top: 6px;
+    text-align: center;
+  }
+  .modal-cancel:hover { background: #16213e; }
+
+  .convert-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85); z-index: 300;
+    align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px;
+  }
+  .convert-overlay.show { display: flex; }
+  .convert-spinner {
+    width: 40px; height: 40px;
+    border: 4px solid #333; border-top-color: #1a936f;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .convert-text { font-size: 14px; color: #aaa; text-align: center; line-height: 1.6; }
+
+  .status-bar {
+    padding: 4px 12px; background: #0d1b2a; font-size: 10px; color: #445;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px;
+  }
+  kbd {
+    background: #222; border: 1px solid #444; border-radius: 3px;
+    padding: 0px 4px; font-size: 9px; font-family: monospace; color: #888;
+  }
+  #fileInput { display: none; }
+
+  @media (max-width: 768px) {
+    .toolbar { gap: 6px; padding: 6px 8px; }
+    .divider { display: none; }
+    input[type="range"] { width: 60px; }
+    .palette-color { width: 20px; height: 20px; }
+    .status-bar .shortcuts { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="toolbar-group">
+    <button class="btn btn-load" id="loadVideoBtn">📁 動画読込</button>
+    <span class="res-badge" id="resBadge">--</span>
+  </div>
+  <div class="divider"></div>
+  <div class="toolbar-group">
+    <button class="brush-btn active" data-brush="pen">ペン</button>
+    <button class="brush-btn" data-brush="pencil">鉛筆</button>
+  </div>
+  <div class="divider"></div>
+  <div class="toolbar-group">
+    <input type="color" id="colorPicker" value="#ffffff">
+    <div class="palette" id="palette"></div>
+  </div>
+  <div class="divider"></div>
+  <div class="toolbar-group">
+    <label>太さ</label>
+    <input type="range" id="sizeSlider" min="1" max="80" value="16">
+    <div class="size-preview"><div class="size-dot" id="sizeDot"></div></div>
+  </div>
+  <div class="divider"></div>
+  <div class="toolbar-group">
+    <button class="btn btn-default" id="eraserBtn">消しゴム</button>
+    <button class="btn btn-default" id="undoBtn">↩</button>
+    <button class="btn btn-default" id="redoBtn">↪</button>
+    <button class="btn btn-danger" id="clearBtn">全消去</button>
+  </div>
+  <div class="divider"></div>
+  <div class="toolbar-group">
+    <select class="toolbar-select" id="fpsSelect">
+      <option value="24">24fps</option>
+      <option value="30" selected>30fps</option>
+      <option value="60">60fps</option>
+    </select>
+    <button class="btn btn-record" id="recordBtn">⏺ 録画</button>
+    <div class="rec-indicator" id="recIndicator"><div class="rec-dot"></div><span>REC</span></div>
+    <div class="timer" id="timer"></div>
+  </div>
+</div>
+
+<div class="canvas-container" id="canvasContainer">
+  <div class="canvas-wrapper" id="canvasWrapper">
+    <video id="refVideo" muted playsinline></video>
+    <canvas id="paintCanvas"></canvas>
+  </div>
+  <div class="drop-zone initial" id="dropZone">
+    <div class="drop-zone-content">
+      <div class="icon">🎬</div>
+      <h2>参照動画をドロップ or 読み込み</h2>
+      <p>動画の解像度でキャンバスが自動設定されます</p>
+      <div style="display:flex; gap:10px; justify-content:center; align-items:center; flex-wrap:wrap;">
+        <button class="btn btn-load" onclick="document.getElementById('fileInput').click()">ファイルを選択</button>
+        <span style="color:#445; font-size:12px;">または</span>
+        <button class="btn btn-default" id="noVideoBtn">動画なしで開始</button>
+      </div>
+    </div>
+  </div>
+  <div class="drag-overlay" id="dragOverlay"><span>ドロップして動画を読み込む</span></div>
+</div>
+
+<div class="video-controls" id="videoControls">
+  <button class="btn-small" id="playPauseBtn">▶</button>
+  <button class="btn-small" id="restartBtn">⏮</button>
+  <input type="range" class="video-timeline" id="videoTimeline" min="0" max="1000" value="0">
+  <span class="video-time" id="videoTime">0:00 / 0:00</span>
+  <div class="divider" style="height:20px;"></div>
+  <label>透明度</label>
+  <input type="range" class="opacity-slider" id="opacitySlider" min="10" max="100" value="50">
+  <button class="btn-small" id="toggleVideoVisibility">👁</button>
+</div>
+
+<div class="modal-overlay" id="exportModal">
+  <div class="modal">
+    <h3>書き出し形式を選択</h3>
+    <div class="export-option" id="exportMp4">
+      <div class="export-icon">🎬</div>
+      <div class="export-info">
+        <h4>MP4（グリーンバック）</h4>
+        <p>DaVinci Resolve対応 H.264/MP4。緑背景付きで書き出し、Delta Keyerでグリーンを抜いて使用。</p>
+        <span class="export-tag tag-green">どこでも再生可</span>
+        <span class="export-tag tag-orange">要クロマキー</span>
+      </div>
+    </div>
+    <div class="export-option" id="exportWebm">
+      <div class="export-icon">✨</div>
+      <div class="export-info">
+        <h4>WebM（透明背景）</h4>
+        <p>背景なし・そのまま透過合成可能。Chrome/Android対応。iPhone/Safariでは再生不可。</p>
+        <span class="export-tag tag-blue">背景なし</span>
+        <span class="export-tag tag-orange">iOS非対応</span>
+      </div>
+    </div>
+    <button class="modal-cancel" id="exportCancel">キャンセル（録画データ破棄）</button>
+  </div>
+</div>
+
+<div class="convert-overlay" id="convertOverlay">
+  <div class="convert-spinner"></div>
+  <div class="convert-text" id="convertText">変換中...</div>
+</div>
+
+<div class="status-bar">
+  <span id="statusText">動画を読み込むか「動画なしで開始」を選択</span>
+  <span class="shortcuts">
+    <kbd>Space</kbd> 再生 &nbsp;
+    <kbd>⌘Z</kbd> 戻す &nbsp;
+    <kbd>⌘⇧Z</kbd> やり直し &nbsp;
+    <kbd>E</kbd> 消しゴム &nbsp;
+    <kbd>B</kbd> ブラシ &nbsp;
+    <kbd>R</kbd> 録画
+  </span>
+</div>
+
+<input type="file" id="fileInput" accept="video/*">
+
+<script>
+(function() {
+  const canvas = document.getElementById('paintCanvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const exportCanvas = document.createElement('canvas');
+  const exportCtx = exportCanvas.getContext('2d');
+  const canvasContainer = document.getElementById('canvasContainer');
+  const canvasWrapper = document.getElementById('canvasWrapper');
+  const refVideo = document.getElementById('refVideo');
+  const colorPicker = document.getElementById('colorPicker');
+  const sizeSlider = document.getElementById('sizeSlider');
+  const sizeDot = document.getElementById('sizeDot');
+  const recordBtn = document.getElementById('recordBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const undoBtn = document.getElementById('undoBtn');
+  const eraserBtn = document.getElementById('eraserBtn');
+  const recIndicator = document.getElementById('recIndicator');
+  const timerEl = document.getElementById('timer');
+  const statusText = document.getElementById('statusText');
+  const resBadge = document.getElementById('resBadge');
+  const loadVideoBtn = document.getElementById('loadVideoBtn');
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const dragOverlay = document.getElementById('dragOverlay');
+  const noVideoBtn = document.getElementById('noVideoBtn');
+  const videoControls = document.getElementById('videoControls');
+  const playPauseBtn = document.getElementById('playPauseBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const videoTimeline = document.getElementById('videoTimeline');
+  const videoTime = document.getElementById('videoTime');
+  const opacitySlider = document.getElementById('opacitySlider');
+  const toggleVideoVisibility = document.getElementById('toggleVideoVisibility');
+  const fpsSelect = document.getElementById('fpsSelect');
+  const exportModal = document.getElementById('exportModal');
+  const convertOverlay = document.getElementById('convertOverlay');
+  const convertText = document.getElementById('convertText');
+
+  let isDrawing = false, isEraser = false, isRecording = false;
+  let hasVideo = false, videoVisible = true, started = false;
+  let lastX = 0, lastY = 0, lastPressure = 0.5;
+  let canvasWidth = 1920, canvasHeight = 1080;
+  let strokes = [], redoStrokes = [], currentSnapshot = null;
+  let currentBrush = 'pen';
+
+  let recTransparent = null, chunksTransparent = [];
+  let exportAnimFrame = null;
+  let recordStartTime = 0, recordElapsed = 0, timerInterval = null, timelineAnimFrame = null;
+  let recPaused = false;
+
+  let videoEncoder = null, inlineMuxer = null;
+  let mp4FrameInterval = null, mp4FrameCount = 0, mp4Timestamp = 0;
+  let mp4Mode = 'none'; // 'h264' | 'none'
+
+  const GREEN = '#00FF00';
+
+  const paletteColors = [
+    { color: '#ffffff', name: 'ホワイト' },
+    { color: '#000000', name: 'ブラック' },
+    { color: '#E8A87C', name: 'ピーチ' },
+    { color: '#95B8D1', name: 'ダスティブルー' },
+    { color: '#B8D8BA', name: 'セージグリーン' },
+    { color: '#D4A5A5', name: 'ローズ' },
+    { color: '#FF2D55', name: 'ネオンピンク' },
+    { color: '#FFCC00', name: 'ビビッドイエロー' },
+    { color: '#00E5FF', name: 'シアン' },
+    { color: '#76FF03', name: 'ライムグリーン' },
+  ];
+
+  function init() {
+    setupPalette();
+    setupBrushButtons();
+    updateSizeDot();
+  }
+
+  function setupPalette() {
+    const container = document.getElementById('palette');
+    paletteColors.forEach(({ color, name }) => {
+      const el = document.createElement('div');
+      el.className = 'palette-color' + (color === colorPicker.value ? ' active' : '');
+      el.style.background = color;
+      if (color === '#000000') el.style.boxShadow = 'inset 0 0 0 1px #444';
+      const tip = document.createElement('span');
+      tip.className = 'tooltip'; tip.textContent = name;
+      el.appendChild(tip);
+      el.addEventListener('click', () => {
+        colorPicker.value = color;
+        document.querySelectorAll('.palette-color').forEach(e => e.classList.remove('active'));
+        el.classList.add('active');
+        if (isEraser) toggleEraser();
+      });
+      container.appendChild(el);
+    });
+  }
+
+  function setupBrushButtons() {
+    document.querySelectorAll('.brush-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentBrush = btn.dataset.brush;
+        document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        if (isEraser) toggleEraser();
+      });
+    });
+  }
+
+  // === Canvas ===
+  function setupCanvas(w, h) {
+    canvasWidth = w; canvasHeight = h;
+    canvas.width = w; canvas.height = h;
+    exportCanvas.width = w; exportCanvas.height = h;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    strokes = []; redoStrokes = [];
+    fitToContainer();
+    resBadge.textContent = `${w}×${h}`;
+  }
+
+  function fitToContainer() {
+    const rect = canvasContainer.getBoundingClientRect();
+    const scale = Math.min(rect.width / canvasWidth, rect.height / canvasHeight) * 0.95;
+    const dw = canvasWidth * scale, dh = canvasHeight * scale;
+    canvasWrapper.style.width = dw + 'px';
+    canvasWrapper.style.height = dh + 'px';
+    canvas.style.width = dw + 'px';
+    canvas.style.height = dh + 'px';
+  }
+  window.addEventListener('resize', () => { if (started) fitToContainer(); });
+
+  // === Video ===
+  function loadVideo(file) {
+    const url = URL.createObjectURL(file);
+    refVideo.src = url; refVideo.load();
+    refVideo.onloadedmetadata = () => {
+      setupCanvas(refVideo.videoWidth, refVideo.videoHeight);
+      refVideo.style.display = 'block';
+      refVideo.style.opacity = parseInt(opacitySlider.value) / 100;
+      hasVideo = true; started = true;
+      dropZone.style.display = 'none';
+      videoControls.classList.add('show');
+      statusText.textContent = `読込完了: ${file.name} (${refVideo.videoWidth}×${refVideo.videoHeight})`;
+    };
+    refVideo.onerror = () => alert('この動画は読み込めませんでした。');
+  }
+
+  noVideoBtn.addEventListener('click', () => {
+    const res = prompt('解像度を入力 (例: 1920x1080)', '1920x1080');
+    if (!res) return;
+    const m = res.match(/(\d+)\s*[x×]\s*(\d+)/i);
+    if (!m) { alert('形式: 1920x1080'); return; }
+    setupCanvas(parseInt(m[1]), parseInt(m[2]));
+    refVideo.style.display = 'none';
+    hasVideo = false; started = true;
+    dropZone.style.display = 'none';
+    statusText.textContent = `準備完了 (${canvasWidth}×${canvasHeight})`;
+  });
+
+  loadVideoBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) loadVideo(e.target.files[0]); });
+
+  let dragCounter = 0;
+  canvasContainer.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dragOverlay.classList.add('show'); });
+  canvasContainer.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragOverlay.classList.remove('show'); dragCounter = 0; } });
+  canvasContainer.addEventListener('dragover', (e) => e.preventDefault());
+  canvasContainer.addEventListener('drop', (e) => {
+    e.preventDefault(); dragCounter = 0; dragOverlay.classList.remove('show');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith('video/')) loadVideo(f);
+    else alert('動画ファイルをドロップしてください。');
+  });
+
+  // === Video playback — synced with recording ===
+  playPauseBtn.addEventListener('click', togglePlayPause);
+  function togglePlayPause() {
+    if (!hasVideo) return;
+    if (refVideo.paused) {
+      refVideo.play();
+      playPauseBtn.textContent = '⏸';
+      startTimelineUpdate();
+      if (isRecording && recPaused) resumeRecording();
+    } else {
+      refVideo.pause();
+      playPauseBtn.textContent = '▶';
+      stopTimelineUpdate();
+      if (isRecording && !recPaused) pauseRecording();
+    }
+  }
+
+  function pauseRecording() {
+    recPaused = true;
+    recordElapsed += Date.now() - recordStartTime;
+    clearInterval(timerInterval);
+    if (recTransparent && recTransparent.state === 'recording') recTransparent.pause();
+    if (mp4Mode !== 'none') pauseMp4Encoder();
+    statusText.textContent = '録画一時停止中 — 動画を再生すると録画も再開します (描画は引き続き可能)';
+  }
+
+  function resumeRecording() {
+    recPaused = false;
+    recordStartTime = Date.now();
+    timerInterval = setInterval(updateRecTimer, 100);
+    if (recTransparent && recTransparent.state === 'paused') recTransparent.resume();
+    const fps = parseInt(fpsSelect.value);
+    if (mp4Mode !== 'none') resumeMp4Encoder(fps);
+    statusText.textContent = `録画中 [${fps}fps] (${canvasWidth}×${canvasHeight})`;
+  }
+
+  restartBtn.addEventListener('click', () => { if (hasVideo) { refVideo.currentTime = 0; updateTimeDisplay(); } });
+  videoTimeline.addEventListener('input', () => {
+    if (!hasVideo || !refVideo.duration) return;
+    refVideo.currentTime = (videoTimeline.value / 1000) * refVideo.duration;
+    updateTimeDisplay();
+  });
+  function startTimelineUpdate() { (function u() { updateTimeDisplay(); if (!refVideo.paused) timelineAnimFrame = requestAnimationFrame(u); })(); }
+  function stopTimelineUpdate() { if (timelineAnimFrame) cancelAnimationFrame(timelineAnimFrame); }
+  refVideo.addEventListener('ended', () => {
+    playPauseBtn.textContent = '▶'; stopTimelineUpdate();
+    if (isRecording && !recPaused) pauseRecording();
+  });
+  function updateTimeDisplay() {
+    if (!refVideo.duration) return;
+    videoTimeline.value = (refVideo.currentTime / refVideo.duration) * 1000;
+    videoTime.textContent = `${fmtTime(refVideo.currentTime)} / ${fmtTime(refVideo.duration)}`;
+  }
+  function fmtTime(s) { return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
+  opacitySlider.addEventListener('input', () => { if (hasVideo && videoVisible) refVideo.style.opacity = parseInt(opacitySlider.value) / 100; });
+  toggleVideoVisibility.addEventListener('click', () => {
+    videoVisible = !videoVisible;
+    refVideo.style.display = videoVisible ? 'block' : 'none';
+    toggleVideoVisibility.textContent = videoVisible ? '👁' : '🚫';
+  });
+
+  // === Drawing ===
+  function getCanvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+  }
+  function getPressure(e) {
+    if (e.pressure !== undefined && e.pressure > 0) return e.pressure;
+    return 0.5;
+  }
+
+  function startStroke(e) {
+    if (!started) return; e.preventDefault(); isDrawing = true;
+    currentSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const p = getCanvasPos(e); lastX = p.x; lastY = p.y;
+    lastPressure = getPressure(e);
+    const pressure = lastPressure, baseSize = parseInt(sizeSlider.value);
+    if (isEraser) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath(); ctx.arc(lastX, lastY, baseSize / 2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,1)'; ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (currentBrush === 'pencil') {
+      drawPencilDot(lastX, lastY, baseSize, pressure);
+    } else {
+      const size = baseSize * (0.5 + pressure * 0.5);
+      ctx.globalAlpha = 0.7 + pressure * 0.3;
+      ctx.beginPath(); ctx.arc(lastX, lastY, size / 2, 0, Math.PI * 2);
+      ctx.fillStyle = colorPicker.value; ctx.fill();
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
+  function drawStroke(e) {
+    if (!isDrawing) return; e.preventDefault();
+    const p = getCanvasPos(e), pressure = getPressure(e), baseSize = parseInt(sizeSlider.value);
+    if (isEraser) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineWidth = baseSize; ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ctx.globalCompositeOperation = 'source-over';
+    } else if (currentBrush === 'pencil') {
+      drawPencilSegment(lastX, lastY, p.x, p.y, baseSize, pressure);
+    } else {
+      const size = baseSize * (0.5 + pressure * 0.5);
+      ctx.globalAlpha = 0.7 + pressure * 0.3;
+      ctx.lineWidth = size; ctx.strokeStyle = colorPicker.value;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ctx.globalAlpha = 1.0;
+    }
+    lastX = p.x; lastY = p.y; lastPressure = pressure;
+  }
+
+  function drawPencilDot(x, y, baseSize, pressure) {
+    const size = baseSize * (0.3 + pressure * 0.7), alpha = 0.15 + pressure * 0.35;
+    const c = colorPicker.value;
+    const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+    const count = Math.max(3, Math.floor(size * 1.5));
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2, d = Math.random() * size * 0.4;
+      const dx = x + Math.cos(a) * d, dy = y + Math.sin(a) * d, ds = 0.5 + Math.random() * 1.2;
+      ctx.globalAlpha = alpha * (0.4 + Math.random() * 0.6);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(dx - ds / 2, dy - ds / 2, ds, ds);
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  function drawPencilSegment(x1, y1, x2, y2, baseSize, pressure) {
+    const dist = Math.hypot(x2 - x1, y2 - y1), steps = Math.max(1, Math.floor(dist / 1.5));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      drawPencilDot(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, baseSize, lastPressure + (pressure - lastPressure) * t);
+    }
+  }
+
+  function endStroke() {
+    if (!isDrawing) return; isDrawing = false;
+    if (currentSnapshot) {
+      strokes.push(currentSnapshot);
+      if (strokes.length > 50) strokes.shift();
+      currentSnapshot = null;
+      redoStrokes = [];
+    }
+  }
+
+  canvas.addEventListener('pointerdown', startStroke);
+  canvas.addEventListener('pointermove', drawStroke);
+  canvas.addEventListener('pointerup', endStroke);
+  canvas.addEventListener('pointerleave', endStroke);
+
+  sizeSlider.addEventListener('input', updateSizeDot);
+  function updateSizeDot() { const s = Math.max(4, parseInt(sizeSlider.value)); sizeDot.style.width = s + 'px'; sizeDot.style.height = s + 'px'; }
+
+  colorPicker.addEventListener('input', () => {
+    document.querySelectorAll('.palette-color').forEach(e => e.classList.toggle('active', e.style.background === colorPicker.value));
+    if (isEraser) toggleEraser();
+  });
+
+  function toggleEraser() { isEraser = !isEraser; eraserBtn.classList.toggle('btn-active', isEraser); canvas.style.cursor = isEraser ? 'cell' : 'crosshair'; }
+  eraserBtn.addEventListener('click', toggleEraser);
+
+  function undo() {
+    if (strokes.length === 0) return;
+    redoStrokes.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    ctx.putImageData(strokes.pop(), 0, 0);
+  }
+  function redo() {
+    if (redoStrokes.length === 0) return;
+    strokes.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    ctx.putImageData(redoStrokes.pop(), 0, 0);
+  }
+  undoBtn.addEventListener('click', undo);
+  document.getElementById('redoBtn').addEventListener('click', redo);
+  clearBtn.addEventListener('click', () => {
+    strokes.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    redoStrokes = [];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  });
+
+  // ==================================================
+  // Export canvas loop — anti-green-spill via blur
+  // ==================================================
+  function startExportLoop() {
+    (function render() {
+      exportCtx.fillStyle = GREEN;
+      exportCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+      // Anti-spill: blurred spread of strokes fills transition zone with stroke color
+      exportCtx.filter = 'blur(4px)';
+      exportCtx.drawImage(canvas, 0, 0);
+      exportCtx.drawImage(canvas, 0, 0);
+      exportCtx.drawImage(canvas, 0, 0);
+      exportCtx.filter = 'none';
+      // Sharp strokes on top
+      exportCtx.drawImage(canvas, 0, 0);
+      exportAnimFrame = requestAnimationFrame(render);
+    })();
+  }
+  function stopExportLoop() { if (exportAnimFrame) cancelAnimationFrame(exportAnimFrame); }
+
+  function findMime(types) {
+    for (const t of types) { if (MediaRecorder.isTypeSupported(t)) return t; }
+    return '';
+  }
+
+  // ==================================================
+  // Inline MP4 Muxer — no external dependencies
+  // ISO 14496-12 compliant, DaVinci Resolve compatible
+  // ==================================================
+  const InlineMuxer = (() => {
+    const u16 = v => [(v >> 8) & 0xFF, v & 0xFF];
+    const u32 = v => [(v >>> 24) & 0xFF, (v >>> 16) & 0xFF, (v >>> 8) & 0xFF, v & 0xFF];
+    const s = t => [t.charCodeAt(0), t.charCodeAt(1), t.charCodeAt(2), t.charCodeAt(3)];
+    const z = n => new Array(n).fill(0);
+    const mat = () => [0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000].flatMap(v => u32(v));
+
+    function bx(type, ...parts) { const d = parts.flat(Infinity); return [...u32(8 + d.length), ...s(type), ...d]; }
+    function fb(type, ver, fl, ...parts) { const d = parts.flat(Infinity); return [...u32(12 + d.length), ...s(type), ver, (fl >> 16) & 0xFF, (fl >> 8) & 0xFF, fl & 0xFF, ...d]; }
+
+    return class {
+      constructor(w, h, fps) {
+        this.w = w; this.h = h; this.fps = fps;
+        this.ts = 90000; this.fd = Math.round(90000 / fps);
+        this.samples = []; this.chunks = []; this.sz = 0; this.avcC = null;
+      }
+      add(data, isKey, config) {
+        const d = new Uint8Array(data);
+        this.samples.push({ size: d.length, isKey });
+        this.chunks.push(d); this.sz += d.length;
+        if (config && !this.avcC) this.avcC = new Uint8Array(config);
+      }
+      build() {
+        if (!this.samples.length || !this.avcC) return null;
+        const n = this.samples.length, dur = n * this.fd;
+        const ft = new Uint8Array(bx('ftyp', s('isom'), u32(0x200), s('isom'), s('iso2'), s('avc1'), s('mp41')));
+        const m0 = new Uint8Array(this._moov(dur, 0));
+        const off = ft.length + m0.length + 8;
+        const mv = new Uint8Array(this._moov(dur, off));
+        const total = ft.length + mv.length + 8 + this.sz;
+        const out = new Uint8Array(total); let o = 0;
+        out.set(ft, o); o += ft.length;
+        out.set(mv, o); o += mv.length;
+        const dv = new DataView(out.buffer, o);
+        dv.setUint32(0, 8 + this.sz);
+        out[o + 4] = 0x6D; out[o + 5] = 0x64; out[o + 6] = 0x61; out[o + 7] = 0x74; o += 8;
+        for (const c of this.chunks) { out.set(c, o); o += c.length; }
+        return out.buffer;
+      }
+      _moov(dur, doff) {
+        return bx('moov',
+          fb('mvhd', 0, 0, u32(0), u32(0), u32(this.ts), u32(dur), u32(0x10000), u16(0x100), z(10), mat(), z(24), u32(2)),
+          bx('trak',
+            fb('tkhd', 0, 3, u32(0), u32(0), u32(1), z(4), u32(dur), z(8), u16(0), u16(0), u16(0), u16(0), mat(), u32(this.w << 16), u32(this.h << 16)),
+            bx('mdia',
+              fb('mdhd', 0, 0, u32(0), u32(0), u32(this.ts), u32(dur), u32(0x55C40000)),
+              fb('hdlr', 0, 0, u32(0), s('vide'), z(12), [...'VideoHandler\0'].map(c => c.charCodeAt(0))),
+              bx('minf',
+                fb('vmhd', 0, 1, u16(0), u16(0), u16(0), u16(0)),
+                bx('dinf', fb('dref', 0, 0, u32(1), fb('url ', 0, 1))),
+                this._stbl(doff)
+              )
+            )
+          )
+        );
+      }
+      _stbl(doff) {
+        const n = this.samples.length, ac = [...this.avcC];
+        const avc1 = bx('avc1', z(6), u16(1), z(16), u16(this.w), u16(this.h), u32(0x480000), u32(0x480000), z(4), u16(1), z(32), u16(0x18), [0xFF, 0xFF], bx('avcC', ac));
+        const kf = this.samples.map((s, i) => s.isKey ? i + 1 : 0).filter(v => v > 0);
+        return bx('stbl',
+          fb('stsd', 0, 0, u32(1), avc1),
+          fb('stts', 0, 0, u32(1), u32(n), u32(this.fd)),
+          fb('stsc', 0, 0, u32(1), u32(1), u32(n), u32(1)),
+          fb('stsz', 0, 0, u32(0), u32(n), this.samples.flatMap(s => u32(s.size))),
+          fb('stco', 0, 0, u32(1), u32(doff)),
+          fb('stss', 0, 0, u32(kf.length), kf.flatMap(v => u32(v)))
+        );
+      }
+    };
+  })();
+
+  // ==================================================
+  // H.264 encoder via WebCodecs
+  // ==================================================
+  function pickH264Codec(w, h) {
+    const px = w * h;
+    if (px <= 921600)  return 'avc1.64001f'; // <=720p  -> Level 3.1
+    if (px <= 2073600) return 'avc1.640028'; // <=1080p -> Level 4.0
+    if (px <= 3686400) return 'avc1.640029'; // <=2K    -> Level 4.1
+    return 'avc1.640033';                     // 4K+    -> Level 5.1
+  }
+
+  async function checkH264Support(w, h) {
+    if (typeof VideoEncoder === 'undefined') {
+      console.log('[mp4] VideoEncoder API not available');
+      return null;
+    }
+    const ew = w % 2 === 0 ? w : w - 1;
+    const eh = h % 2 === 0 ? h : h - 1;
+    const codec = pickH264Codec(ew, eh);
+    console.log('[mp4] Checking codec:', codec, 'for', ew, 'x', eh);
+    try {
+      const support = await VideoEncoder.isConfigSupported({
+        codec, width: ew, height: eh, bitrate: 8_000_000,
+      });
+      console.log('[mp4] isConfigSupported:', support.supported);
+      if (support.supported) return { codec, w: ew, h: eh };
+    } catch (e) {
+      console.error('[mp4] isConfigSupported error:', e);
+    }
+    // Fallback: Baseline Profile
+    try {
+      const fallback = 'avc1.42001e';
+      console.log('[mp4] Trying fallback codec:', fallback);
+      const s2 = await VideoEncoder.isConfigSupported({
+        codec: fallback, width: ew, height: eh, bitrate: 8_000_000,
+      });
+      if (s2.supported) return { codec: fallback, w: ew, h: eh };
+    } catch (e) {}
+    return null;
+  }
+
+  async function startMp4Encoder(fps) {
+    const result = await checkH264Support(canvasWidth, canvasHeight);
+    console.log('[mp4] checkH264Support result:', result);
+
+    if (!result) {
+      statusText.textContent = '⚠ H.264未対応 (' + canvasWidth + 'x' + canvasHeight + ')。Chrome最新版をお使いください。';
+      mp4Mode = 'none';
+      return false;
+    }
+
+    const { codec, w: encW, h: encH } = result;
+    console.log('[mp4] Using codec:', codec, encW, 'x', encH);
+
+    inlineMuxer = new InlineMuxer(encW, encH, fps);
+
+    videoEncoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        const buf = new ArrayBuffer(chunk.byteLength);
+        chunk.copyTo(buf);
+        const cfg = meta?.decoderConfig?.description
+          ? new Uint8Array(meta.decoderConfig.description) : null;
+        inlineMuxer.add(buf, chunk.type === 'key', cfg);
+      },
+      error: (e) => {
+        console.error('[mp4] VideoEncoder async error:', e);
+        statusText.textContent = '⚠ エンコードエラー: ' + e.message;
+      },
+    });
+
+    videoEncoder.configure({
+      codec, width: encW, height: encH,
+      bitrate: 8_000_000, framerate: fps,
+      avc: { format: 'avc' },
+    });
+
+    mp4FrameCount = 0; mp4Timestamp = 0;
+    startFrameCapture(fps);
+    mp4Mode = 'h264';
+    console.log('[mp4] H.264 encoding started:', codec, fps + 'fps', encW + 'x' + encH);
+    return true;
+  }
+
+  function startFrameCapture(fps) {
+    const intervalMs = 1000 / fps;
+    mp4FrameInterval = setInterval(() => {
+      try {
+        const frame = new VideoFrame(exportCanvas, { timestamp: mp4Timestamp });
+        const keyFrame = mp4FrameCount % (fps * 2) === 0;
+        videoEncoder.encode(frame, { keyFrame });
+        frame.close();
+        mp4Timestamp += Math.round(1_000_000 / fps);
+        mp4FrameCount++;
+      } catch (e) {
+        console.error('[mp4] Frame capture error:', e);
+      }
+    }, intervalMs);
+  }
+
+  function pauseMp4Encoder() {
+    if (mp4FrameInterval) { clearInterval(mp4FrameInterval); mp4FrameInterval = null; }
+  }
+
+  function resumeMp4Encoder(fps) {
+    if (mp4Mode !== 'h264' || !videoEncoder || !inlineMuxer) return;
+    startFrameCapture(fps);
+  }
+
+  async function stopMp4Encoder() {
+    pauseMp4Encoder();
+    if (mp4Mode === 'h264' && videoEncoder && videoEncoder.state !== 'closed') {
+      try { await videoEncoder.flush(); videoEncoder.close(); }
+      catch (e) { console.error('[mp4] Encoder flush error:', e); }
+    }
+    console.log(`[mp4] Encoding done. Frames: ${mp4FrameCount}`);
+  }
+
+  function getGreenBackBlob() {
+    if (mp4Mode === 'h264' && inlineMuxer) {
+      const buf = inlineMuxer.build();
+      console.log('[mp4] build() result:', buf ? buf.byteLength + ' bytes' : 'null',
+        'samples:', inlineMuxer.samples.length, 'avcC:', !!inlineMuxer.avcC);
+      if (!buf || buf.byteLength < 100) return null;
+      return { blob: new Blob([buf], { type: 'video/mp4' }), ext: 'mp4', codec: 'H.264' };
+    }
+    return null;
+  }
+
+  // === Start / Stop Recording ===
+  async function startRecording() {
+    if (!started) { alert('先にキャンバスを準備してください。'); return; }
+    const fps = parseInt(fpsSelect.value);
+
+    const webmMime = findMime(['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']);
+    if (!webmMime) {
+      alert('録画非対応のブラウザです。Chromeを使用してください。');
+      return;
+    }
+
+    // Start green-back export canvas loop
+    startExportLoop();
+
+    // WebM transparent recorder
+    chunksTransparent = [];
+    const stream = canvas.captureStream(fps);
+    recTransparent = new MediaRecorder(stream, { mimeType: webmMime, videoBitsPerSecond: 10000000 });
+    recTransparent.ondataavailable = (e) => { if (e.data.size > 0) chunksTransparent.push(e.data); };
+    recTransparent.start(100);
+
+    // H.264 MP4 encoder
+    await startMp4Encoder(fps);
+
+    isRecording = true;
+    recPaused = false;
+    recordBtn.textContent = '⏹ 停止';
+    recordBtn.classList.add('recording');
+    recIndicator.classList.add('show');
+    fpsSelect.disabled = true;
+    recordElapsed = 0;
+    recordStartTime = Date.now();
+    timerInterval = setInterval(updateRecTimer, 100);
+    const codecLabel = mp4Mode === 'h264' ? ' [H.264/MP4]' : ' [⚠ MP4不可]';
+    statusText.textContent = `録画中 [${fps}fps] (${canvasWidth}×${canvasHeight})${codecLabel}`;
+
+    if (hasVideo && refVideo.paused) {
+      refVideo.currentTime = 0; refVideo.play();
+      playPauseBtn.textContent = '⏸'; startTimelineUpdate();
+    }
+  }
+
+  async function stopRecording() {
+    isRecording = false;
+    recPaused = false;
+    recordBtn.textContent = '⏺ 録画';
+    recordBtn.classList.remove('recording');
+    recIndicator.classList.remove('show');
+    fpsSelect.disabled = false;
+    clearInterval(timerInterval); timerEl.textContent = '';
+    if (hasVideo && !refVideo.paused) { refVideo.pause(); playPauseBtn.textContent = '▶'; stopTimelineUpdate(); }
+
+    if (mp4Mode !== 'none') {
+      statusText.textContent = 'エンコード完了処理中...';
+      await stopMp4Encoder();
+    }
+
+    // Stop WebM recorder
+    if (recTransparent && recTransparent.state === 'paused') recTransparent.resume();
+
+    if (recTransparent && recTransparent.state !== 'inactive') {
+      recTransparent.onstop = () => { stopExportLoop(); showExportDialog(); };
+      recTransparent.stop();
+    } else {
+      stopExportLoop();
+      showExportDialog();
+    }
+  }
+
+  function updateRecTimer() {
+    const total = recordElapsed + (recPaused ? 0 : (Date.now() - recordStartTime));
+    const s = Math.floor(total / 1000);
+    timerEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  recordBtn.addEventListener('click', async () => { if (isRecording) await stopRecording(); else await startRecording(); });
+
+  // === Export dialog ===
+  function showExportDialog() {
+    exportModal.classList.add('show');
+  }
+
+  document.getElementById('exportMp4').addEventListener('click', () => {
+    exportModal.classList.remove('show');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+    if (mp4Mode !== 'h264') {
+      alert('H.264エンコーダが起動できませんでした。\n\nブラウザのコンソール (F12) に詳細ログがあります。\nmp4Mode=' + mp4Mode);
+      statusText.textContent = '⚠ MP4書き出し不可 — コンソールを確認してください';
+      return;
+    }
+
+    const result = getGreenBackBlob();
+    if (result) {
+      const filename = `paint-overlay-${canvasWidth}x${canvasHeight}-${ts}.${result.ext}`;
+      downloadBlob(result.blob, filename);
+      statusText.textContent = `保存完了: ${filename} (${fmtSize(result.blob.size)}, ${result.codec}) — DaVinciでDelta Keyerでグリーンを抜いてください`;
+    } else {
+      alert('MP4データの生成に失敗しました。\n\nフレーム数: ' + mp4FrameCount +
+        '\nサンプル数: ' + (inlineMuxer ? inlineMuxer.samples.length : 0) +
+        '\navcC: ' + (inlineMuxer ? !!inlineMuxer.avcC : false) +
+        '\n\nコンソール (F12) で詳細を確認してください。');
+      statusText.textContent = '⚠ MP4データ生成失敗 — コンソールを確認';
+    }
+  });
+
+  document.getElementById('exportWebm').addEventListener('click', () => {
+    exportModal.classList.remove('show');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `paint-overlay-${canvasWidth}x${canvasHeight}-${ts}.webm`;
+
+    if (chunksTransparent.length === 0) {
+      statusText.textContent = 'WebM録画データがありません。';
+      return;
+    }
+
+    const blob = new Blob(chunksTransparent, { type: recTransparent ? recTransparent.mimeType : 'video/webm' });
+    downloadBlob(blob, filename);
+    statusText.textContent = `WebM保存完了 (${fmtSize(blob.size)}, 透明背景) — Chrome/Androidで再生可`;
+  });
+
+  document.getElementById('exportCancel').addEventListener('click', () => {
+    exportModal.classList.remove('show');
+    statusText.textContent = '録画データを破棄しました。';
+  });
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  function fmtSize(bytes) {
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  // === Keyboard shortcuts ===
+  document.addEventListener('keydown', (e) => {
+    const t = document.activeElement.tagName;
+    if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return;
+    if (exportModal.classList.contains('show')) return;
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    if (mod && e.shiftKey && e.key === 'z') { e.preventDefault(); redo(); return; }
+    if (mod && e.key === 'z') { e.preventDefault(); undo(); return; }
+    if (e.key === 'e' || e.key === 'E') toggleEraser();
+    if (e.key === 'b' || e.key === 'B') {
+      currentBrush = currentBrush === 'pen' ? 'pencil' : 'pen';
+      document.querySelectorAll('.brush-btn').forEach(b => b.classList.toggle('active', b.dataset.brush === currentBrush));
+      if (isEraser) toggleEraser();
+    }
+    if (e.key === 'r' || e.key === 'R') { if (isRecording) stopRecording(); else startRecording(); }
+    if (e.key === ' ') { e.preventDefault(); togglePlayPause(); }
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>
